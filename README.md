@@ -9,6 +9,8 @@ A tiny Minecraft-style voxel sandbox that runs entirely in your web browser, bui
 > Some people said the Minecraft clone I fully made myself in three.js would never work. Here it is anyway.
 >
 > https://www.reddit.com/r/LocalLLaMA/comments/1w2cxcw/some_people_said_the_minecraft_clone_i_fully/
+>
+> — by [u/liright](https://www.reddit.com/user/liright)
 
 ## Features
 
@@ -73,4 +75,5 @@ The **Settings** menu adjusts video (draw distance, FOV, particles), mouse (sens
 
 - Engine & rendering: [three.js](https://threejs.org/)
 - Generated with **Qwen3 (27B)**
-- Original concept/discussion: [Reddit r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/comments/1w2cxcw/some_people_said_the_minecraft_clone_i_fully/)
+- Original author: [u/liright](https://www.reddit.com/user/liright) — [Reddit post](https://www.reddit.com/r/LocalLLaMA/comments/1w2cxcw/some_people_said_the_minecraft_clone_i_fully/)
+- This repository is a port/mirror of the original release; all credit goes to the original creator.
