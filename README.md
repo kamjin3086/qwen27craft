@@ -73,7 +73,8 @@ The **Settings** menu adjusts video (draw distance, FOV, particles), mouse (sens
 
 ## Credits
 
+- Original author & source: [u/liright](https://www.reddit.com/user/liright) — [Reddit post](https://www.reddit.com/r/LocalLLaMA/comments/1w2cxcw/some_people_said_the_minecraft_clone_i_fully/)
 - Engine & rendering: [three.js](https://threejs.org/)
 - Generated with **Qwen3 (27B)**
-- Original author: [u/liright](https://www.reddit.com/user/liright) — [Reddit post](https://www.reddit.com/r/LocalLLaMA/comments/1w2cxcw/some_people_said_the_minecraft_clone_i_fully/)
-- This repository is a port/mirror of the original release; all credit goes to the original creator.
+
+> This repository is just a port/mirror of u/liright's original release, uploaded here for convenience. All credit goes to the original creator.
