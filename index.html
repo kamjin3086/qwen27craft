@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Qwen27craft — a tiny voxel game</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>â›ï¸</text></svg>" />
+<style>
+   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b1420; }
+   canvas { display: block; }
+
+   /* Crosshair */
+   #crosshair {
+     position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
+     transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+     display: none;
+   }
+   body.locked #crosshair { display: block; }
+   #crosshair::before, #crosshair::after {
+     content: ""; position: absolute; background: rgba(255,255,255,.9);
+     mix-blend-mode: difference; border-radius: 1px;
+   }
+   #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+   #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+
+   /* Debug HUD */
+   #debug {
+     position: fixed; top: 14px; left: 16px; z-index: 10; pointer-events: none;
+     color: rgba(255,255,255,.8); font-family: Consolas, "Courier New", monospace;
+     font-size: 11px; line-height: 1.5; white-space: pre;
+     text-shadow: 0 1px 3px rgba(0,0,0,.6); user-select: none;
+   }
+
+   /* Hotbar */
+   #hotbarWrap { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 10; text-align: center; pointer-events: none; }
+   #selname { color: rgba(255,255,255,.9); font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; margin-bottom: 7px; min-height: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.6); opacity: .95; transition: transform .12s ease, opacity .12s ease; }
+   #selname.pop { transform: translateY(-4px) scale(1.08); }
+   /* vitals row: hearts on the left, hunger on the right, hugging the hotbar */
+   #vitals { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 9px; width: 100%; }
+   #hotbar { display: inline-flex; gap: 5px; padding: 6px; background: rgba(10,14,22,.38); border-radius: 10px; backdrop-filter: blur(3px); }
+   .slot {
+     position: relative; width: 54px; height: 54px; border-radius: 7px;
+     background: rgba(255,255,255,.08); border: 2px solid rgba(0,0,0,.55);
+     box-shadow: inset 0 0 6px rgba(0,0,0,.35);
+     display: flex; align-items: center; justify-content: center;
+     transition: transform .1s ease, border-color .1s ease, background .1s ease;
+   }
+   .slot canvas { width: 38px; height: 38px; image-rendering: pixelated; }
+   .slot .num { position: absolute; right: 4px; bottom: 2px; font-size: 9px; color: rgba(255,255,255,.6); font-family: monospace; }
+   .slot.selected { border-color: #fff; background: rgba(255,255,255,.18); transform: translateY(-4px); box-shadow: 0 3px 10px rgba(0,0,0,.35), inset 0 0 6px rgba(0,0,0,.2); }
+   .slot .count { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%); font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 4px rgba(0,0,0,.6); pointer-events: none; }
+
+    /* Inventory panel (Tab): 3 bag rows + the hotbar row, ~36% of screen height */
+    #inventory { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -52%) scale(.97); z-index: 18; display: none; opacity: .94; transition: opacity .1s ease, transform .1s ease;
+      background: rgba(9,11,18,.82); border: 1px solid rgba(255,255,255,.10); border-radius: 12px;
+      box-shadow: 0 14px 44px rgba(0,0,0,.55), inset 0 0 30px rgba(0,0,0,.35); backdrop-filter: blur(5px);
+      padding: min(22px, 2.8vh) min(16px, 1.4vw); user-select: none; }
+    #inventory.show { display: block; opacity: 1; transform: translate(-50%, -52%) scale(1); }
+    .invhd { font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.75); margin-bottom: min(14px, 1.6vh); text-align: center; }
+    #invGrid { display: flex; flex-direction: column; gap: min(9px, 0.9vh); }
+    .invrow { display: flex; gap: min(7px, 0.7vw); }
+    .invrow.hot { margin-top: min(4px, 0.5vh); padding-top: min(6px, 0.7vh); border-top: 1px solid rgba(255,255,255,.12); }
+    .islot { position: relative; width: min(60px, calc((36vh - 4 * min(9px, 0.9vh)) / 8)); height: min(60px, calc((36vh - 4 * min(9px, 0.9vh)) / 8));
+      border-radius: 7px; background: rgba(255,255,255,.08); border: 2px solid rgba(0,0,0,.55);
+      box-shadow: inset 0 0 6px rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .islot canvas { width: 72%; height: 72%; image-rendering: pixelated; pointer-events: none; }
+    .islot.selected { border-color: #fff; background: rgba(255,255,255,.18); box-shadow: inset 0 0 6px rgba(0,0,0,.2); }
+
+      /* two separate labelled boxes when a chest is open: chest contents on top, the player's bag below */
+      #inventory.chestopen .invhd { display: none; }   /* the generic "Inventory" title is replaced by per-box labels */
+      .invbox { display: flex; flex-direction: column; gap: min(7px, 0.6vw); padding: min(9px,1vh) min(10px,0.8vw); background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.17); border-radius: 10px; }
+      .panel-hd { font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.7); padding: 0 3px min(3px,0.3vh); }
+    body.invopen #menu { opacity: 0 !important; pointer-events: none !important; transition: none; }   /* the panel replaces the pause screen */
+    body.invopen #hotbarWrap { opacity: .35; }
+    /* stack being dragged - follows the cursor, above everything */
+    #invGhost { position: fixed; left: 0; top: 0; z-index: 19; width: min(60px, calc((36vh - 4 * min(9px, 0.9vh)) / 8)); height: min(60px, calc((36vh - 4 * min(9px, 0.9vh)) / 8));
+      display: none; pointer-events: none; filter: drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
+    #invGhost.show { display: block; }
+    #invGhost canvas { width: 100%; height: 100%; image-rendering: pixelated; }
+    #invGhost .count { position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%); font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 4px rgba(0,0,0,.6); }
+
+   /* Hearts (left) + hunger (right) */
+   #hearts { display: flex; gap: 3px; align-items: center; margin-left: 3px; }
+   #hearts canvas { width: 16px; height: 13px; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+   #hunger { display: flex; gap: 3px; align-items: center; }
+   #hunger canvas { width: 16px; height: 14px; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+  #oxygenrow { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; margin-right: 3px; }
+  #oxygen { display: none; gap: 3px; align-items: center; width: 100%; justify-content: flex-end; } /* shown only while submerged */
+  #oxygen.show { display: flex; }
+  #oxygen canvas { width: 16px; height: 14px; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+
+  /* ============ MLRS cockpit HUD (top-down targeting view) ============ */
+  #mlrs { position: fixed; inset: 0; z-index: 12; pointer-events: none; display: none; font-family: Consolas, "Courier New", monospace; color: #c8ffd4; }
+  body.mlrs #mlrs { display: block; }
+  body.mlrs #hotbarWrap { opacity: .25; }   /* dim the survival UI - you're in the launcher now */
+
+    /* ============ MLRS "drone feed" post-FX (applies only while in the cockpit) ============
+       A translucent full-screen layer above the 3D canvas but below the HUD. Desaturation +
+       contrast are a CSS filter on the canvas itself; tint / vignette / grain / scanlines blend
+       over it so everything reads like a cold, grainy aerial drone feed. */
+    /* the same "drone feed" look applies to BOTH the MLRS cockpit and the FPV drone (body.drone) */
+    body.mlrs canvas, body.drone canvas { filter: saturate(0.68) contrast(1.12); }   /* muted colours + a touch more punch */
+
+    #droneFx { position: fixed; inset: 0; z-index: 6; pointer-events: none; display: none; overflow: hidden; }
+    body.mlrs #droneFx, body.drone #droneFx { display: block; }
+
+    #droneTint { position: absolute; inset: 0; background: rgba(58,86,124,.30); mix-blend-mode: color; opacity: .55; }   /* cold blue/gray tint */
+    #droneVig  { position: absolute; inset: 0; box-shadow: inset 0 0 26vmax 10vmax rgba(0,0,0,.55); }                 /* subtle dark vignette */
+    #droneScan {
+      position: absolute; inset: -2px 0; opacity: .18; mix-blend-mode: multiply;                                     /* faint scanlines */
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,.95) 0 1px, transparent 1px 3px);
+    }
+    #droneGrain {
+      position: absolute; inset: -50%; width: 200%; height: 200%; opacity: .07; mix-blend-mode: overlay;              /* light animated grain */
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      animation: droneGrainJitter .4s steps(6) infinite;
+    }
+    @keyframes droneGrainJitter {
+      0%   { transform: translate(0,0); }
+      25%  { transform: translate(-4%,3%); }
+      50%  { transform: translate(3%,-5%); }
+      75%  { transform: translate(-3%,-2%); }
+      100% { transform: translate(5%,4%); }
+    }
+
+  #mlrsBanner { position: absolute; top: 16px; left: 18px; text-shadow: 0 1px 4px rgba(0,0,0,.7); }
+  #mlrsTitle { font-family: "Segoe UI", system-ui, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: .22em; color: #eaffea; text-shadow: 0 2px 10px rgba(0,40,10,.9); }
+  #mlrsSub { font-size: 11px; letter-spacing: .3em; opacity: .85; margin-top: 2px; }
+  #mlrsStatus { display: inline-block; margin-top: 7px; padding: 3px 10px; border: 1px solid rgba(140,255,150,.5); background: rgba(6,28,10,.55); font-size: 13px; letter-spacing: .14em; }
+  #mlrsStatus.warn { color: #ffd97a; border-color: rgba(255,200,90,.6); background: rgba(38,28,4,.55); }
+  #mlrsStatus.bad  { color: #ff8d7a; border-color: rgba(255,110,90,.6); background: rgba(40,8,4,.55); animation: mblink .5s steps(2) infinite; }
+  @keyframes mblink { 50% { opacity: .45; } }
+  #mlrsPanel { position: absolute; top: 16px; right: 18px; width: 238px; border: 1px solid rgba(140,255,150,.35); background: rgba(4,22,9,.55); backdrop-filter: blur(2px); padding: 9px 11px; font-size: 11.5px; line-height: 1.7; text-shadow: 0 1px 2px rgba(0,0,0,.7); }
+  #mlrsPanel .lbl { color: rgba(160,230,170,.75); letter-spacing: .18em; font-size: 10px; margin-top: 6px; }
+  #mlrsTarget { display: flex; justify-content: space-between; gap: 8px; }
+  #mlrsTele { width: 214px; height: 52px; display: block; border: 1px solid rgba(140,255,150,.3); background: rgba(3,16,7,.5); margin-top: 3px; }
+  /* rocket stock graph: 4 rounds x 6 tubes */
+  #mlrsStock { display: flex; gap: 4px; margin-top: 4px; }
+  .mlrtube { flex: 1; display: flex; flex-direction: column; gap: 2.5px; }
+  .mlrcell { height: 8px; background: rgba(150,255,160,.1); border: 1px solid rgba(140,255,150,.25); }
+  .mlrcell.on { background: linear-gradient(180deg, #d9ffb0, #7ad34a); box-shadow: 0 0 5px rgba(140,255,120,.55); border-color: rgba(190,255,160,.8); }
+    /* reload cooldown bar - small & centred, tucked under the BRG/RANGE readout */
+    #mlrsCdWrap { position: absolute; left: 50%; top: calc(50% + 106px); transform: translateX(-50%); width: 132px; height: 6px; border: 1px solid rgba(140,255,150,.35); background: rgba(3,18,8,.45); opacity: .78; display: none; }
+    #mlrsCdWrap.show { display: block; }
+    #mlrsCdBar { height: 100%; width: 100%; background: repeating-linear-gradient(45deg, #ffd97a 0 6px, #b98f2e 6px 12px); transition: width .1s linear; }
+  /* centre bullseye reticle */
+  #mlrsRet { position: absolute; left: 50%; top: 50%; width: 148px; height: 148px; transform: translate(-50%, -50%); --charge: 0deg; }
+  #mlrsRet::before, #mlrsRet .inner { content: ""; position: absolute; border-radius: 50%; border: 2px solid rgba(190,255,190,.85); box-shadow: inset 0 0 6px rgba(120,255,140,.3), 0 0 8px rgba(120,255,140,.22); }
+  #mlrsRet::before { inset: 0; border-style: dashed; animation: mretspin 9s linear infinite; }   /* slow outer sweep */
+  @keyframes mretspin { to { transform: rotate(360deg); } }
+  #mlrsRet .inner { inset: 27px; border-width: 1.5px; }
+  #mlrsRet .dot { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: #eaffe0; box-shadow: 0 0 7px rgba(190,255,190,.9); }
+  .tick { position: absolute; background: rgba(200,255,200,.9); }
+  .tick.tn { left: 50%; top: -6px; width: 2px; height: 13px; margin-left: -1px; }
+  .tick.ts { left: 50%; bottom: -6px; width: 2px; height: 13px; margin-left: -1px; }
+  .tick.te { top: 50%; right: -6px; height: 2px; width: 13px; margin-top: -1px; }
+  .tick.tw { top: 50%; left: -6px; height: 2px; width: 13px; margin-top: -1px; }
+  #mlrsCharge { position: absolute; inset: -9px; border-radius: 50%; background: conic-gradient(from -90deg, rgba(255,180,70,.95) var(--charge), transparent var(--charge)); -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 6px)); mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 6px)); }
+  body.mlrs.armed #mlrsRet { filter: hue-rotate(-42deg) saturate(1.5); }   /* reticle goes hot orange while a volley is armed */
+  #mlrsTgt { position: absolute; left: 50%; top: calc(50% + 86px); transform: translateX(-50%); font-size: 12px; letter-spacing: .1em; white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
+   #hurt { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255,60,40,.05) 45%, rgba(200,15,8,.5) 100%); }
+   #deadmsg { position: fixed; left: 50%; top: 36%; transform: translate(-50%, -50%); z-index: 16; pointer-events: none; font-family: "Segoe UI", system-ui, sans-serif; font-size: 34px; font-weight: 700; letter-spacing: .12em; color: #ff4b40; text-shadow: 0 2px 10px rgba(0,0,0,.8); opacity: 0; }
+   #deadmsg.show { animation: deadfade 2.6s ease forwards; }
+   @keyframes deadfade { 0% { opacity: 0; transform: translate(-50%, -46%) scale(.96); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; } }
+
+
+    /* ============ FPV drone cockpit OSD (betaflight-style overlay) ============ */
+    #droneosd { position: fixed; inset: 0; z-index: 12; pointer-events: none; display: none; font-family: Consolas, "Courier New", monospace; color: #dff4ff; }
+    body.drone #droneosd { display: block; }
+    body.drone #crosshair { display: none; }      /* the OSD brings its own reticle */
+    body.drone #hotbarWrap, body.drone #debug { opacity: .25; }   /* dim the survival UI - you're in the goggles now */
+    /* corner props: two crossed blades whipping inside a faint rotor disc (top-left / top-right) */
+    .dsdProp { position: absolute; top: 30px; width: 46px; height: 46px; filter: drop-shadow(0 1px 4px rgba(0,0,0,.85)); }
+    .dsdProp.tl { left: 74px; }   /* keeps clear of the debug readout */
+    .dsdProp.tr { right: 30px; }
+    .dsdProp::after { content: ""; position: absolute; inset: 1px; border-radius: 50%; border: 1.5px solid rgba(223,244,255,.28); box-shadow: inset 0 0 8px rgba(223,244,255,.12); }
+    .dsdRot { position: absolute; inset: 6px; animation: dsdspin .17s linear infinite; }
+    @keyframes dsdspin { to { transform: rotate(360deg); } }
+    .dsdRot i { position: absolute; left: 50%; top: 50%; width: 92px; height: 5px; margin: -2.5px 0 0 -46px; border-radius: 3px; background: linear-gradient(90deg, transparent, rgba(214,238,255,.75) 30%, #f2fbff 50%, rgba(214,238,255,.75) 70%, transparent); }
+    .dsdRot i:nth-child(2) { transform: rotate(90deg); }
+    /* top banner */
+    #dsdBanner { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); text-align: center; letter-spacing: .3em; font-size: 12px; text-shadow: 0 1px 4px rgba(0,0,0,.9); white-space: nowrap; }
+    #dsdBanner b { color: #b6ffd9; }
+    /* flight data flanking the reticle */
+    .dsdCol { position: absolute; top: 50%; transform: translateY(-50%); width: 180px; font-size: 13px; line-height: 2.1; letter-spacing: .06em; text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+    #dsdL { left: 74px; text-align: left; }
+    #dsdR { right: 74px; text-align: right; }
+    .dsdCol .lbl { display: inline-block; min-width: 34px; color: rgba(180,235,255,.85); font-size: 10px; letter-spacing: .24em; }
+    #dsdThrWrap { display: inline-block; width: 96px; height: 7px; border: 1px solid rgba(190,240,255,.5); background: rgba(8,22,32,.55); vertical-align: middle; margin-left: 6px; }
+    #dsdThrBar { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #4ecf8e, #b6ffd9); transition: width .08s linear; }
+    /* center reticle */
+    #dsdRet { position: absolute; left: 50%; top: 50%; width: 72px; height: 72px; transform: translate(-50%, -50%); }
+    #dsdRet::before, #dsdRet::after { content: ""; position: absolute; background: rgba(234,251,255,.95); box-shadow: 0 0 6px rgba(130,255,195,.55); border-radius: 1px; }
+    #dsdRet::before { left: 8px; right: 8px; top: 35px; height: 2px; }
+    #dsdRet::after  { top: 8px; bottom: 8px; left: 35px; width: 2px; }
+    #dsdRet i { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: #fff; box-shadow: 0 0 7px rgba(140,255,200,.9); }
+    /* attitude ladder: horizon rule + two ticks that sink as the nose rises (JS drives translateY) */
+    #dsdHor { position: absolute; left: 50%; top: 50%; width: 210px; height: 84px; transform: translate(-50%, -50%); }
+    #dsdHor i { position: absolute; left: 30px; right: 30px; height: 2px; background: rgba(234,251,255,.75); box-shadow: 0 0 5px rgba(130,255,195,.4); }
+    #dsdHor .c { left: 0; right: 0; background: rgba(234,251,255,.95); top: 41px; }   /* level mark */
+    #dsdHor .t { top: 17px; opacity: .6; }
+    #dsdHor .b { top: 65px; opacity: .6; }
+    /* bottom: heading + control hints */
+    #dsdBot { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); text-align: center; font-size: 13px; letter-spacing: .18em; text-shadow: 0 1px 4px rgba(0,0,0,.9); white-space: nowrap; }
+    #dsdHint { margin-top: 6px; font-size: 10.5px; opacity: .72; letter-spacing: .2em; }
+
+  /* ============ Pause / main menu (start screen, pause, controls, settings) ============ */
+  #menu {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+    text-align: center; cursor: default; overflow-y: auto;
+    background: radial-gradient(ellipse at center, rgba(10,20,40,.18) 0%, rgba(6,11,22,.70) 100%);
+    transition: opacity .25s ease; font-family: "Segoe UI", system-ui, sans-serif; color: #fff;
+  }
+  body.locked #menu { opacity: 0; pointer-events: none; }
+  .screen { display: none; flex-direction: column; align-items: center; padding: 20px 12px; }
+  .screen.show { display: flex; }
+  #menu h1 { margin: 0 0 4px; font-size: 44px; letter-spacing: .18em; text-transform: uppercase; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.5); }
+  #menu h1.small { font-size: 26px; margin-bottom: 16px; letter-spacing: .1em; }
+  #menu .sub { margin: 0 0 28px; font-size: 13px; letter-spacing: .34em; opacity: .7; text-transform: uppercase; }
+  /* MC-style stone buttons */
+  .mcbtn {
+    display: block; width: min(360px, 84vw); margin: 7px auto; padding: 9px 14px; cursor: pointer; user-select: none;
+    font-family: "Segoe UI", system-ui, sans-serif; font-size: 15px; color: #e8e8e8; letter-spacing: .02em; text-align: center;
+    background: linear-gradient(180deg, #7a7a7a, #4b4b4b); border: 1px solid #1c1c1c;
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.3), inset 0 -3px 0 rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.35);
+    transition: filter .1s ease;
+  }
+  .mcbtn:hover { color: #cfe0ff; filter: brightness(1.2); box-shadow: inset 0 0 0 1px #9db4e8, inset 0 2px 0 rgba(255,255,255,.3), inset 0 -3px 0 rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.35); }
+  .mcbtn:active { filter: brightness(.92); box-shadow: inset 0 2px 4px rgba(0,0,0,.5); }
+  #menu .footer { margin-top: 28px; font-size: 11.5px; letter-spacing: .16em; opacity: .55; text-transform: uppercase; }
+  /* framed panels (controls + settings screens) */
+  .panel { width: min(740px, 94vw); background: rgba(8,13,26,.78); border: 1px solid rgba(255,255,255,.15); padding: 20px 28px;
+    box-shadow: 0 14px 44px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.09); backdrop-filter: blur(6px); }
+  .panel h3 { margin: 0 0 12px; font-size: 17px; letter-spacing: .24em; text-transform: uppercase; color: #dce8ff; }
+  /* controls list */
+  .ctlgroups { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 36px; text-align: left; }
+  @media (max-width: 640px) { .ctlgroups { grid-template-columns: 1fr; } }
+  .grp h4 { margin: 12px 0 5px; font-size: 11px; letter-spacing: .3em; color: #9fb7e8; text-transform: uppercase; }
+  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 4.5px 0; border-bottom: 1px dotted rgba(255,255,255,.1); font-size: 13.5px; }
+  .row:last-child { border-bottom: none; }
+  .row kbd { background: rgba(255,255,255,.14); padding: 2px 8px; border-radius: 4px; font-family: Consolas, monospace; font-size: 11.5px; white-space: nowrap; box-shadow: inset 0 -2px 0 rgba(0,0,0,.35); }
+  .row span { opacity: .92; line-height: 1.35; text-align: right; }
+  .special { padding: 8px 0; border-bottom: 1px dotted rgba(255,255,255,.1); font-size: 13px; }
+  .special:last-child { border-bottom: none; }
+  .special b { display: block; margin-bottom: 3px; color: #d7e6ff; font-size: 13.5px; }
+  .special i { opacity: .85; line-height: 1.45; font-style: normal; }
+  /* settings screen — sectioned rows with aligned label / control columns */
+  #screen-settings .panel { width: min(640px, 94vw); }
+  .shead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .shint { font-size: 10.5px; letter-spacing: .1em; opacity: .5; text-transform: uppercase; white-space: nowrap; }
+  .ssec-hd { display: flex; align-items: center; gap: 12px; margin: 20px 0 4px; font-size: 10.5px; letter-spacing: .3em; color: #9fb7e8; text-transform: uppercase; }
+  .ssec-hd::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.1); }
+  .srow { display: flex; align-items: center; gap: 18px; width: 100%; padding: 11px 0; font-size: 14.5px; }
+  .sset-sec > .srow + .srow { border-top: 1px solid rgba(255,255,255,.06); }
+  .srow .lab { flex: 0 0 44%; text-align: left; line-height: 1.3; min-width: 0; }
+  .srow .lab b { display: block; font-weight: 600; color: #e8efff; }
+  .srow .lab small { display: block; font-size: 11px; opacity: .55; margin-top: 2px; line-height: 1.35; }
+  .ctl { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+  .ctl.col { flex-direction: column; align-items: flex-end; gap: 7px; }
+  .srow .val { font-family: Consolas, monospace; font-size: 12.5px; color: #cfe0ff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); padding: 3px 9px; border-radius: 6px; min-width: 62px; text-align: center; white-space: nowrap; flex-shrink: 0; }
+  input[type=range] { width: clamp(120px, 34vw, 240px); accent-color: #8fb8ff; cursor: pointer; flex-shrink: 0; }
+  .seg { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; max-width: 100%; }
+  .seg .mcbtn { display: inline-block; width: auto; margin: 2px 0; padding: 7px 14px; font-size: 13px; text-align: center; border-radius: 6px; opacity: .9; }
+  .seg .mcbtn:hover { color: #fff; filter: brightness(1.15); }
+  .seg .mcbtn.active { opacity: 1; color: #fff; background: linear-gradient(180deg, #5f84c9, #3d5b96); box-shadow: inset 0 0 0 2px rgba(200,220,255,.75), inset 0 -3px 0 rgba(0,0,0,.3), 0 1px 4px rgba(0,0,0,.3); }
+  .toggle { width: auto !important; min-width: 68px; padding: 8px 12px !important; font-size: 12.5px !important; letter-spacing: .2em; margin-left: auto; flex-shrink: 0; border-radius: 7px; color: #b9c2d4; }
+  .toggle.on { color: #eafff3; background: linear-gradient(180deg, #4e9a6b, #2f6d46); box-shadow: inset 0 0 0 2px rgba(170,255,200,.5), inset 0 -3px 0 rgba(0,0,0,.3); }
+  .setfoot { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.09); display: flex; justify-content: flex-end; }
+  .setfoot .mcbtn { width: auto; min-width: 170px; margin: 0; }
+    /* ============ computer screen (seated at a machine -> the little OS takes over, pointer is released) ============ */
+    #compScreen { position: fixed; inset: 0; z-index: 20; display: none; pointer-events: none; font-family: "Segoe UI", system-ui, sans-serif; }   /* transparent full-screen layer - only the monitor is real, world stays visible around it */
+    body.comp #compScreen { display: block; }
+    body.comp #menu { opacity: 0 !important; pointer-events: none; transition: none; }     /* pause/start screens must not float over or eat clicks on the display */
+    #compMonBezel { position: absolute; left: 0; top: 0; transform-origin: 0 0; width: min(90vw, calc(88vh * 1.2)); aspect-ratio: 4 / 3; pointer-events: auto;   /* JS (updateCompOverlay) sets a per-frame translate+scale so this box lands on the real monitor face of the 3D cabinet */
+      background: linear-gradient(180deg, #3a3f4c, #23262e); border-radius: 10px; padding: min(1.6vh, 12px); box-shadow: 0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.14); }
+    #compDesktop { position: relative; width: 100%; height: 100%; background: #0e8a9b; border-radius: 3px; overflow: hidden; box-shadow: inset 0 0 18px rgba(0,0,0,.35); }
+    .compIcon { position: absolute; width: 86px; display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; user-select: none; padding: 7px 4px; border: 1px solid transparent; }
+    .compIcon canvas { width: 48px; height: 48px; image-rendering: pixelated; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); transition: transform .1s ease, filter .1s ease; }
+    .compIcon span { display: block; margin-top: 6px; color: #fff; font-size: 12.5px; line-height: 1.2; text-shadow: 0 1px 2px rgba(0,0,0,.7); }
+    .compIcon:hover { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.4); }
+    .compIcon.pressed canvas { transform: scale(.9) translateY(2px); filter: brightness(.7); }
+    #icPelican { left: 18px; top: 16px; }
+    #icTerrainria { left: 118px; top: 16px; }
+
+      /* ---- Pelican Bench app window (covers ~80% of the monitor display) ---- */
+      .compWin { position: absolute; left: 10%; top: 5%; width: 80%; height: 79%; display: none; flex-direction: column;
+        background: #eef2f8; border-radius: 6px; box-shadow: 0 14px 36px rgba(0,0,0,.55); pointer-events: auto; overflow: hidden; }
+      .compWin.open { display: flex; animation: compWinIn .18s ease-out; }
+      @keyframes compWinIn { from { transform: scale(.92) translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+      #pbTitlebar { height: 25px; flex-shrink: 0; display: flex; align-items: center; padding: 0 6px 0 9px; user-select: none;
+        background: linear-gradient(180deg, #6fa8e8, #3a66b4); color: #fff; font-size: 12.5px; text-shadow: 0 1px 1px rgba(0,0,0,.4); }
+      #pbClose { margin-left: auto; width: 21px; height: 21px; line-height: 19px; text-align: center; font-size: 13px; cursor: pointer; color: #fff;
+        background: linear-gradient(180deg, #f3756b, #c8352a); border-radius: 3px; box-shadow: inset 0 -2px 0 rgba(0,0,0,.25); }
+      #pbClose:hover { filter: brightness(1.15); }
+      #pbBody { flex: 1; padding: 8px; overflow: hidden; }
+      #pbBody svg { width: 100%; height: 100%; display: block; border-radius: 4px; box-shadow: inset 0 0 12px rgba(0,0,0,.3); }
+        /* ---- Terrainria app window (a tiny side-scroller on a pixel canvas) ---- */
+        #trTitlebar { height: 25px; flex-shrink: 0; display: flex; align-items: center; padding: 0 6px 0 9px; user-select: none;
+          background: linear-gradient(180deg, #7fc76d, #3c7a2b); color: #fff; font-size: 12.5px; text-shadow: 0 1px 1px rgba(0,0,0,.4); }
+        #trClose { margin-left: auto; width: 21px; height: 21px; line-height: 19px; text-align: center; font-size: 13px; cursor: pointer; color: #fff;
+          background: linear-gradient(180deg, #f3756b, #c8352a); border-radius: 3px; box-shadow: inset 0 -2px 0 rgba(0,0,0,.25); }
+        #trClose:hover { filter: brightness(1.15); }
+        #trBody { flex: 1; padding: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #141920; }
+        #trGame { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; border-radius: 4px; box-shadow: inset 0 0 12px rgba(0,0,0,.3); }
+    #compTaskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 34px; background: #dcdcdc; border-top: 2px solid rgba(255,255,255,.8);
+      display: flex; align-items: center; gap: 10px; padding: 0 10px; pointer-events: none; }   /* the taskbar is only for show */
+    #compLogo { width: 16px; height: 16px; image-rendering: pixelated; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+    #compTime { margin-left: auto; font-size: 12.5px; color: #222; background: rgba(255,255,255,.72); border: 1px solid #a8a8a8; padding: 3px 9px; border-radius: 2px; white-space: nowrap; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+   <div id="debug"></div>
+   <div id="crosshair"></div>
+
+   <div id="hurt"></div>
+   <div id="deadmsg">YOU DIED</div>
+
+   <div id="hotbarWrap">
+     <div id="selname">&nbsp;</div>
+     <div id="vitals">
+       <div id="hearts"></div>
+       <div id="oxygenrow"><div id="oxygen"></div>
+      <div id="hunger"></div></div>
+     </div>
+     <div id="hotbar"></div>
+   </div>
+
+    <!-- Inventory (Tab): 3 bag rows + hotbar row, drag & drop between any slots -->
+    <div id="inventory">
+      <div class="invhd">Inventory</div>
+      <div id="invGrid"></div>
+    </div>
+    <div id="invGhost"><canvas id="invGhostCanvas" width="16" height="16"></canvas><span class="count" id="invGhostCount"></span></div>
+
+
+    <div id="droneFx"><i id="droneTint"></i><i id="droneVig"></i><i id="droneScan"></i><i id="droneGrain"></i></div>
+
+   <div id="mlrs">
+     <div id="mlrsBanner">
+       <div id="mlrsTitle">MLRS</div>
+       <div id="mlrsSub">MULTIPLE LAUNCH ROCKET SYSTEM // AERIAL TARGETING NET</div>
+       <span id="mlrsStatus">SYSTEM ONLINE</span>
+     </div>
+     <div id="mlrsPanel">
+       <div class="lbl">TARGET SOLUTION</div>
+       <div id="mlrsTarget"><span id="mlrsTgtXY">X ---  Z ---</span><span id="mlrsRange">RNG --- m</span></div>
+       <div class="lbl">ROCKETS LOADED (3 PODS X 4 ROUNDS)</div>
+       <div id="mlrsStock"></div>
+       <div class="lbl">AERIAL TELEMETRY // SIGNAL STRENGTH</div>
+       <canvas id="mlrsTele" width="214" height="52"></canvas>
+     </div>
+     <div id="mlrsCdWrap"><div id="mlrsCdBar"></div></div>
+     <div id="mlrsRet"><div class="inner"></div><span class="dot"></span><i class="tick tn"></i><i class="tick ts"></i><i class="tick te"></i><i class="tick tw"></i><div id="mlrsCharge"></div></div>
+     <div id="mlrsTgt">NO RETURN</div>
+   </div>
+
+    <!-- FPV drone cockpit OSD: corner props, center reticle + attitude ladder, altitude/VS left, speed/throttle right (betaflight-ish) -->
+    <div id="droneosd">
+      <span class="dsdProp tl"><span class="dsdRot"><i></i><i></i></span></span>
+      <span class="dsdProp tr"><span class="dsdRot"><i></i><i></i></span></span>
+      <div id="dsdBanner">FPV QUAD &nbsp;·&nbsp; <b>PAYLOAD ARMED</b></div>
+      <div id="dsdL" class="dsdCol">
+        <div><span class="lbl">ALT</span> <span id="dsdAlt">--.- m</span></div>
+        <div><span class="lbl">VS</span>&nbsp; <span id="dsdVs">▲ 0.0 m/s</span></div>
+      </div>
+      <div id="dsdR" class="dsdCol">
+        <div><span class="lbl">SPD</span> <span id="dsdSpd">0.0 m/s</span></div>
+        <div><span class="lbl">THR</span> <span id="dsdThrWrap"><i id="dsdThrBar"></i></span></div>
+      </div>
+      <div id="dsdHor"><i class="t"></i><i class="c"></i><i class="b"></i></div>
+      <div id="dsdRet"><i></i></div>
+      <div id="dsdBot">
+        <div id="dsdHdg">HDG ---°</div>
+        <div id="dsdHint">W/A/D&nbsp;THRUST · SHIFT&nbsp;CLIMB / PITCH DOWN TO DIVE · MOUSE&nbsp;STEER · RMB / ESC&nbsp;JETTISON — ANY IMPACT = BANG</div>
+      </div>
+    </div>
+
+
+    <!-- Computer screen: seated at a machine -> the pointer is released and this little OS takes over (icons clickable, taskbar not) -->
+    <div id="compScreen">
+      <div id="compMonBezel">
+        <div id="compDesktop">
+          <div class="compIcon" id="icPelican"><canvas width="32" height="32"></canvas><span>Pelican&nbsp;Bench</span></div>
+          <div class="compIcon" id="icTerrainria"><canvas width="32" height="32"></canvas><span>Terrainria</span></div>
+
+            <!-- Pelican Bench app window: a pelican riding a bicycle (spinning wheels, scrolling road dashes) -->
+            <div id="pbWin" class="compWin">
+              <div id="pbTitlebar">Pelican&nbsp;Bench<span id="pbClose">×</span></div>
+              <div id="pbBody">
+                <svg viewBox="0 0 420 260" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="pbSky" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#7cc8f5"/>
+                      <stop offset=".6" stop-color="#b9e6fb"/>
+                      <stop offset="1" stop-color="#e6f7ff"/>
+                    </linearGradient>
+                  </defs>
+                  <!-- sky, sun, clouds -->
+                  <rect x="0" y="0" width="420" height="260" fill="url(#pbSky)"/>
+                  <circle cx="352" cy="50" r="28" fill="#ffe9a3" opacity=".55"/>
+                  <circle cx="352" cy="50" r="17" fill="#ffd44d"/>
+                  <g fill="#ffffff" opacity=".95">
+                    <ellipse cx="86" cy="58" rx="30" ry="9"/>
+                    <circle cx="72" cy="52" r="11"/><circle cx="90" cy="46" r="14"/><circle cx="106" cy="53" r="10"/>
+                  </g>
+                  <g fill="#ffffff" opacity=".85">
+                    <ellipse cx="238" cy="34" rx="22" ry="7"/>
+                    <circle cx="228" cy="30" r="8"/><circle cx="242" cy="26" r="10"/>
+                  </g>
+                  <!-- hills, grass, road -->
+                  <path d="M0 170 Q 60 138 130 162 T 270 158 Q 340 144 420 164 L 420 208 L 0 208 Z" fill="#9fd68a"/>
+                  <rect x="0" y="178" width="420" height="30" fill="#6fbf5a"/>
+                  <rect x="0" y="208" width="420" height="52" fill="#4c5561"/>
+                  <line x1="0" y1="209" x2="420" y2="209" stroke="#3a424b" stroke-width="2"/>
+                  <g>
+                    <line x1="-32" y1="236" x2="452" y2="236" stroke="#e8edf2" stroke-width="4" stroke-dasharray="18 14"/>
+                    <animateTransform attributeName="transform" type="translate" from="0 0" to="-32 0" dur=".5s" repeatCount="indefinite"/>
+                  </g>
+                  <!-- street sign -->
+                  <rect x="336" y="168" width="4" height="26" fill="#7a5a3a"/>
+                  <rect x="314" y="148" width="48" height="19" rx="3" fill="#3e6b9e" stroke="#ffffff" stroke-width="1.5"/>
+                  <text x="338" y="162" font-family="Verdana, sans-serif" font-size="9" font-weight="bold" fill="#ffffff" text-anchor="middle">PELICAN AVE</text>
+                  <!-- speed lines -->
+                  <rect x="40" y="186" width="36" height="4" rx="2" fill="#ffffff" opacity=".5"/>
+                  <rect x="26" y="196" width="46" height="4" rx="2" fill="#ffffff" opacity=".35"/>
+                  <!-- far pedal leg (behind the bike) -->
+                  <path d="M 192 160 L 184 198 L 199 229" fill="none" stroke="#e07f10" stroke-width="7" stroke-linecap="round"/>
+                  <!-- wheels (spokes spin) -->
+                  <g>
+                    <circle cx="146" cy="228" r="28" fill="none" stroke="#2b2f36" stroke-width="5"/>
+                    <circle cx="146" cy="228" r="23" fill="none" stroke="#cfd6dd" stroke-width="1.5"/>
+                    <g stroke="#9aa6b2" stroke-width="2">
+                      <line x1="124" y1="228" x2="168" y2="228"/><line x1="146" y1="206" x2="146" y2="250"/>
+                      <line x1="130.4" y1="212.4" x2="161.6" y2="243.6"/><line x1="161.6" y1="212.4" x2="130.4" y2="243.6"/>
+                      <animateTransform attributeName="transform" type="rotate" from="0 146 228" to="360 146 228" dur=".9s" repeatCount="indefinite"/>
+                    </g>
+                    <circle cx="146" cy="228" r="4" fill="#dfe5ec"/>
+                  </g>
+                  <g>
+                    <circle cx="272" cy="228" r="28" fill="none" stroke="#2b2f36" stroke-width="5"/>
+                    <circle cx="272" cy="228" r="23" fill="none" stroke="#cfd6dd" stroke-width="1.5"/>
+                    <g stroke="#9aa6b2" stroke-width="2">
+                      <line x1="250" y1="228" x2="294" y2="228"/><line x1="272" y1="206" x2="272" y2="250"/>
+                      <line x1="256.4" y1="212.4" x2="287.6" y2="243.6"/><line x1="287.6" y1="212.4" x2="256.4" y2="243.6"/>
+                      <animateTransform attributeName="transform" type="rotate" from="0 272 228" to="360 272 228" dur=".9s" repeatCount="indefinite"/>
+                    </g>
+                    <circle cx="272" cy="228" r="4" fill="#dfe5ec"/>
+                  </g>
+                  <!-- frame, chain, saddle, bars -->
+                  <ellipse cx="179" cy="230" rx="33" ry="6" fill="none" stroke="#5a6470" stroke-width="2" opacity=".7"/>
+                  <g stroke="#d94a3d" stroke-width="5" stroke-linecap="round">
+                    <line x1="146" y1="228" x2="212" y2="232"/>
+                    <line x1="212" y1="232" x2="196" y2="178"/>
+                    <line x1="146" y1="228" x2="196" y2="180"/>
+                    <line x1="212" y1="232" x2="256" y2="184"/>
+                    <line x1="196" y1="180" x2="256" y2="182"/>
+                    <line x1="256" y1="182" x2="272" y2="228"/>
+                  </g>
+                  <line x1="254" y1="178" x2="250" y2="164" stroke="#2b2f36" stroke-width="4" stroke-linecap="round"/>
+                  <path d="M 236 162 Q 248 154 261 160" fill="none" stroke="#2b2f36" stroke-width="5" stroke-linecap="round"/>
+                  <rect x="180" y="172" width="30" height="7" rx="3" fill="#2b2f36"/>
+                  <circle cx="212" cy="232" r="7" fill="none" stroke="#5a6470" stroke-width="2.5"/>
+                  <line x1="200" y1="232" x2="224" y2="232" stroke="#5a6470" stroke-width="3"/>
+                  <rect x="194" y="229.5" width="13" height="5" rx="1" fill="#2b2f36"/>
+                  <rect x="218" y="229.5" width="13" height="5" rx="1" fill="#2b2f36"/>
+                  <!-- near pedal leg + foot -->
+                  <path d="M 196 156 L 214 196 L 224 229" fill="none" stroke="#ff9a26" stroke-width="7" stroke-linecap="round"/>
+                  <rect x="218" y="227" width="13" height="5" rx="1" fill="#e07f10"/>
+                  <!-- pelican -->
+                  <polygon points="150,132 114,119 141,146" fill="#eef1f5"/>
+                  <ellipse cx="178" cy="140" rx="35" ry="23" fill="#ffffff" transform="rotate(-10 178 140)"/>
+                  <ellipse cx="174" cy="144" rx="21" ry="12" fill="#dfe6ee"/>
+                  <path d="M 204 132 C 230 128 242 116 246 92" fill="none" stroke="#ffffff" stroke-width="13" stroke-linecap="round"/>
+                  <circle cx="250" cy="84" r="12" fill="#ffffff"/>
+                  <path d="M 254 77 L 298 86 Q 304 90 296 93 L 254 88 Z" fill="#ffb43a"/>
+                  <path d="M 255 88 L 296 93 C 292 110 270 116 258 103 Q 253 96 255 88 Z" fill="#ff9422"/>
+                  <circle cx="255" cy="78" r="3" fill="#1b1f27"/>
+                  <circle cx="256" cy="77" r="1" fill="#ffffff"/>
+                </svg>
+              </div>
+            </div>
+
+          <!-- Terrainria app window: a tiny Terraria-ish side-scroller (A/D move, W/Space jump, S fast-fall) -->
+              <div id="trWin" class="compWin">
+                <div id="trTitlebar">Terrainria<span id="trClose">×</span></div>
+                <div id="trBody"><canvas id="trGame" width="320" height="176"></canvas></div>
+              </div>
+<div id="compTaskbar">
+            <canvas id="compLogo" width="16" height="16"></canvas>
+            <span id="compTime">--:--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+<div id="menu">
+      <!-- Start screen (before first play) -->
+      <div class="screen show" id="screen-start">
+        <h1>Qwen27craft</h1>
+        <p class="sub">a tiny voxel sandbox</p>
+        <button class="mcbtn" id="btnStart">&#9654;&nbsp; Start Game</button>
+        <button class="mcbtn" id="btnStartSettings">Settings</button>
+        <button class="mcbtn" id="btnStartControls">Controls</button>
+        <p class="footer">press <b>Esc</b> anytime to pause &nbsp;·&nbsp; seed 90210</p>
+      </div>
+
+      <!-- Pause menu (Esc while playing) -->
+      <div class="screen" id="screen-pause">
+        <h1 class="small">Game Paused</h1>
+        <button class="mcbtn" id="btnResume">&#9654;&nbsp; Back to Game</button>
+        <button class="mcbtn" id="btnPauseSettings">Settings</button>
+        <button class="mcbtn" id="btnPauseControls">Controls</button>
+      </div>
+
+      <!-- Controls reference -->
+      <div class="screen" id="screen-controls">
+        <div class="panel">
+          <h3>Controls</h3>
+          <div class="ctlgroups">
+            <div class="grp">
+              <h4>Movement &amp; look</h4>
+              <div class="row"><kbd>W A S D</kbd><span>walk / swim</span></div>
+              <div class="row"><kbd>Mouse</kbd><span>look around</span></div>
+              <div class="row"><kbd>Space</kbd><span>jump · float up in water</span></div>
+              <div class="row"><kbd>Shift</kbd><span>sprint · dive underwater</span></div>
+            </div>
+            <div class="grp">
+              <h4>Buiding &amp; items</h4>
+              <div class="row"><kbd>LMB hold</kbd><span>break block (progress cracks)</span></div>
+              <div class="row"><kbd>RMB</kbd><span>place from hand · hold to repeat</span></div>
+              <div class="row"><kbd>1–8 / Wheel</kbd><span>select hotbar slot</span></div>
+                <div class="row"><kbd>Tab / Esc</kbd><span>open &amp; close inventory — drag items between slots (RMB grab takes half)</span></div>
+
+                <div class="row"><kbd>Q / Shift+Q</kbd><span>drop 1 from the selected slot / whole stack — or drag an item out of the inventory panel to drop it on the ground</span></div>
+
+
+              <div class="row"><kbd>RMB hold</kbd><span>eat meat (with it selected)</span></div>
+            </div>
+            <div class="grp">
+              <h4>Misc</h4>
+              <div class="row"><kbd>Esc</kbd><span>pause menu · release mouse</span></div>
+              <div class="special">
+                <b>Creatures</b>
+                <i>Wander passively. Whack them with LMB for meat — cow ×3, sheep ×2, chicken ×1. Watch out: cacti hurt when touched.</i>
+              </div>
+            </div>
+            <div class="grp">
+              <h4>Specials</h4>
+              <div class="special">
+                <b>Skateboard (starts in slot 2)</b>
+                <i>RMB to drop it, RMB again nearby to ride — W/S throttle &amp; brake, A/D steer. W+Space ollie — grabbing Shift right after the jump (or holding it first) turns any jump into a trick (W/S pitch, A/D roll mid-air; land flat or get bucked off). LMB ×3 breaks a placed board back into your hand.</i>
+              </div>
+              <div class="special">
+                <b>MLRS truck (parked near spawn)</b>
+                <i>RMB beside it to take the cockpit: top-down aerial targeting view. Hold LMB to arm, WASD + mouse fly the reticle, release to fire a 12-rock salvo at the bullseye (20 s reload). RMB or Esc exits anytime.</i>
+              </div>
+            </div>
+          </div>
+                <div class="special">
+                  <b>Computer (starts in slot 3)</b>
+                  <i>RMB on a floor sets the machine down. RMB it again to sit at its screen: the pointer unlocks and the little desktop OS takes over — move the mouse freely, click <b>Pelican Bench</b> for its app window — an animated SVG of a pelican riding a bicycle — or click <b>Terrainria</b> to play a tiny Terraria-ish side-scroller on screen (A/D move · W/Space jump · S fast-fall; grab the coins and reach the flag; × closes either window). Watch the clock in the taskbar corner. RMB or Esc stands you back out.</i>
+                </div>
+          <button class="mcbtn" id="btnCtrlBack">Done</button>
+        </div>
+      </div>
+
+        <!-- Settings -->
+        <div class="screen" id="screen-settings">
+          <div class="panel">
+            <div class="shead"><h3>Settings</h3><span class="shint">applies instantly · saved automatically</span></div>
+            <div class="sset-sec">
+              <div class="ssec-hd">Video</div>
+              <div class="srow">
+                <span class="lab"><b>Draw distance</b><small>how far the world renders and fogs out</small></span>
+                <span class="ctl col">
+                  <span class="seg" id="ddGroup">
+                    <button class="mcbtn" data-far="72">Short</button>
+                    <button class="mcbtn" data-far="120">Normal</button>
+                    <button class="mcbtn" data-far="240">Far</button>
+                    <button class="mcbtn" data-far="480">Ultra</button>
+                  </span>
+                  <span class="val" id="ddVal"></span>
+                </span>
+              </div>
+              <div class="srow">
+                <span class="lab"><b>Field of view</b><small>wider = faster, fish-eye-ish</small></span>
+                <span class="ctl"><input type="range" id="fovRange" min="45" max="110" step="1" value="72"><span class="val" id="fovVal"></span></span>
+              </div>
+              <div class="srow">
+                <span class="lab"><b>Block particles</b><small>debris when you break blocks</small></span>
+                <span class="ctl"><button class="mcbtn toggle" id="btnParticles">ON</button></span>
+              </div>
+            </div>
+            <div class="sset-sec">
+              <div class="ssec-hd">Mouse &amp; sound</div>
+              <div class="srow">
+                <span class="lab"><b>Sensitivity</b><small>mouse-look speed</small></span>
+                <span class="ctl"><input type="range" id="sensRange" min="10" max="300" step="5" value="100"><span class="val" id="sensVal"></span></span>
+              </div>
+              <div class="srow">
+                <span class="lab"><b>Invert Y-axis</b><small>flip mouse-look vertical direction</small></span>
+                <span class="ctl"><button class="mcbtn toggle" id="btnInvertY">OFF</button></span>
+              </div>
+              <div class="srow">
+                <span class="lab"><b>Sound volume</b><small>all effects are generated live</small></span>
+                <span class="ctl"><input type="range" id="volRange" min="0" max="100" step="5" value="55"><span class="val" id="volVal"></span></span>
+              </div>
+            </div>
+            <div class="sset-sec">
+              <div class="ssec-hd">Debugging</div>
+              <div class="srow">
+                <span class="lab"><b>Debug info</b><small>top-left fps / position readout</small></span>
+                <span class="ctl"><button class="mcbtn toggle" id="btnDebug">ON</button></span>
+              </div>
+            </div>
+            <div class="setfoot"><button class="mcbtn" id="btnSetBack">Done</button></div>
+          </div>
+        </div>
+    </div>
+
+  
+   <script type="module" src="./game.js"></script>
+</body>
+</html>
